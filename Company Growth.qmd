@@ -1,0 +1,50 @@
+---
+title: "Food Consulting"
+author: "Cooper Riggs & Stockton Nelson"
+format: pdf
+editor: visual
+---
+
+## Setup
+
+```{r}
+#Downloading Libraries
+library(tidyverse)
+
+#Bringing in Data
+food <- vroom::vroom("CompanyGrowth.csv") |>
+  janitor::clean_names() |>
+  rename(growth = pct_growth)
+```
+
+## Problem 1 (Adam)
+
+### 2025 Predictions
+
+```{r}
+
+```
+
+## Problem 2 (Cooper)
+
+### 2 Other Models
+
+```{r}
+
+```
+
+## Problem 3 (Cooper)
+
+### Comparison of Models
+
+```{r}
+
+```
+
+## Problem 4 (Stockton)
+
+### Variables Relationship to Growth
+
+```{r}
+
+```
