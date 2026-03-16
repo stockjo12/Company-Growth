@@ -10,9 +10,12 @@ editor: visual
 ```{r}
 #Downloading Libraries
 library(tidyverse)
+library(prophet)
+library(forecast)
+library(splines)
 
 #Bringing in Data
-food <- vroom::vroom("CompanyGrowth.csv") |>
+company <- vroom::vroom("CompanyGrowth.csv") |>
   janitor::clean_names() |>
   rename(growth = pct_growth)
 ```
@@ -29,16 +32,248 @@ food <- vroom::vroom("CompanyGrowth.csv") |>
 
 ### 2 Other Models
 
-```{r}
+#### Prophet Model
 
+```{r}
+company <- company |>
+  mutate(
+    month = case_when(
+      qrtr == 1 ~ 1,
+      qrtr == 2 ~ 4,
+      qrtr == 3 ~ 7,
+      qrtr == 4 ~ 10
+    ),
+    date = as.Date(paste(year, month, "01", sep = "-"))
+  )
+```
+
+```{r}
+prophet_df <- company |>
+  select(
+    ds = date,
+    y = growth,
+    income,
+    production,
+    savings,
+    unemployment
+  )
+prophet_model <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+prophet_model <- add_seasonality(
+  prophet_model,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+prophet_model <- add_regressor(prophet_model, "income")
+prophet_model <- add_regressor(prophet_model, "production")
+prophet_model <- add_regressor(prophet_model, "savings")
+prophet_model <- add_regressor(prophet_model, "unemployment")
+
+prophet_model <- fit.prophet(prophet_model, prophet_df)
+
+prophet_fitted <- predict(prophet_model, prophet_df) |>
+  pull(yhat)
+
+prophet_resids <- prophet_df$y - prophet_fitted
+
+ggplot(prophet_df, aes(x = prophet_fitted, y = prophet_resids)) + 
+  geom_point() + 
+  labs(
+    title = "Prophet Model",
+    x = "Fitted Values",
+    y = "Residuals"
+  )
+```
+
+#### SARIMA Model
+
+```{r}
+ts_data <- ts(company$growth, frequency = 4)
+xreg <- as.matrix(company[, c("income",
+                                  "production",
+                                  "savings",
+                                  "unemployment")])
+sarima_model <- auto.arima(
+  ts_data,
+  xreg = xreg,
+  seasonal = TRUE
+)
+summary(sarima_model)
+```
+
+```{r}
+checkresiduals(sarima_model)
 ```
 
 ## Problem 3 (Cooper)
 
-### Comparison of Models
+### Comparison of RMSE
 
 ```{r}
+train <- company |> filter(year < 2022)
+test <- company |> filter(year >= 2022)
+```
 
+```{r}
+lm_train <- lm(
+  growth ~ income + production + savings + unemployment,
+  data = train
+)
+```
+
+```{r}
+train_ts <- ts(train$growth, frequency = 4)
+xreg_train <- as.matrix(train[, c("income",
+                                  "production",
+                                  "savings",
+                                  "unemployment")])
+sarima_train <- auto.arima(
+  train_ts,
+  xreg = xreg_train,
+  seasonal = TRUE
+)
+```
+
+```{r}
+prophet_train <- train |>
+  select(
+    ds = date,
+    y = growth,
+    income,
+    production,
+    savings,
+    unemployment
+  )
+prophet_model_train <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+prophet_model_train <- add_seasonality(
+  prophet_model_train,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+prophet_model_train <- add_regressor(prophet_model_train, "income")
+prophet_model_train <- add_regressor(prophet_model_train, "production")
+prophet_model_train <- add_regressor(prophet_model_train, "savings")
+prophet_model_train <- add_regressor(prophet_model_train, "unemployment")
+
+prophet_model_train <- fit.prophet(prophet_model_train, prophet_train)
+```
+
+```{r}
+h <- nrow(test)
+lm_pred <- predict(lm_train, newdata = test)
+```
+
+```{r}
+xreg_test <- as.matrix(test[, c("income",
+                                "production",
+                                "savings",
+                                "unemployment")])
+
+sarima_forecast <- forecast(
+  sarima_train,
+  xreg = xreg_test,
+  h = h
+)
+```
+
+```{r}
+future_df <- test |>
+  select(
+    ds = date,
+    income,
+    production,
+    savings,
+    unemployment
+  )
+prophet_forecast <- predict(prophet_model_train, future_df)
+prophet_pred <- prophet_forecast$yhat
+```
+
+```{r}
+actual <- test$growth
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+```
+
+```{r}
+rmse_lm <- rmse(actual, lm_pred)
+rmse_sarima <- rmse(actual, sarima_forecast$mean)
+rmse_prophet <- rmse(actual, prophet_pred)
+```
+
+```{r}
+comparison <- data.frame(
+  Model = c("Linear Regression", "SARIMA", "Prophet"),
+  RMSE  = c(rmse_lm, rmse_sarima, rmse_prophet)
+)
+
+comparison
+```
+
+### 2025 Future Predictions
+
+```{r}
+last_values <- tail(company, 1)
+
+future_2025 <- data.frame(
+  income = rep(last_values$income, 4),
+  production = rep(last_values$production, 4),
+  savings = rep(last_values$savings, 4),
+  unemployment = rep(last_values$unemployment, 4)
+)
+```
+
+```{r}
+xreg_future <- as.matrix(future_2025)
+
+sarima_forecast_2025 <- forecast(
+  sarima_model,
+  xreg = xreg_future,
+  h = 4
+)
+
+sarima_2025 <- sarima_forecast_2025$mean
+```
+
+```{r}
+future_dates <- data.frame(
+  ds = seq(as.Date("2025-01-01"),
+           by = "quarter",
+           length.out = 4)
+)
+future_prophet <- cbind(
+  future_dates,
+  future_2025
+)
+prophet_2025 <- predict(prophet_model, future_prophet)
+
+prophet_2025_values <- prophet_2025$yhat
+```
+
+```{r}
+projection_2025 <- data.frame(
+  Quarter = c("2025 Q1","2025 Q2","2025 Q3","2025 Q4"),
+  SARIMAX = sarima_2025,
+  Prophet = prophet_2025_values
+)
+
+projection_2025
 ```
 
 ## Problem 4 (Stockton)
