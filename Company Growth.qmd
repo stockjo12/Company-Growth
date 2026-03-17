@@ -1,6 +1,6 @@
 ---
 title: "Food Consulting"
-author: "Cooper Riggs & Stockton Nelson"
+author: "Cooper Riggs, Adam Bitner, & Stockton Nelson"
 format: pdf
 editor: visual
 ---
@@ -457,5 +457,39 @@ projection_2025
 ### Variables Relationship to Growth
 
 ```{r}
+#Finding the 95% Confidence Intervals with the SARIMAX Model
+confint(sarima_model, parm = c("income", "production", "savings", "unemployment"))
+```
 
+```{r}
+#Making a Plot of the 95% Confidence Intervals
+confint_df <- broom::tidy(sarima_model, conf.int = T) |>
+  select(term, estimate, conf.low, conf.high) |>
+  filter(term %in% c("income", "production", "savings", "unemployment"))
+
+ggplot(confint_df, aes(x = estimate, y = term, color = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_y_discrete(labels = c(
+    income = "Income",
+    production = "Production",
+    savings = "Savings",
+    unemployment = "Unemployment Rate"
+  )) +
+  xlim(-1, 1) +
+  scale_color_manual(values = c(
+    income = "#226F54",
+    production = "#706D74",
+    savings = "#DA2C38",
+    unemployment = "#DA2C38"
+  )) +
+  labs(
+    title = "Effect on Company Growth",
+    x = "Estimated Effect",
+    y = "Predictor"
+  ) +
+  theme(legend.position = "none")
+
+ggsave("Growth_Effects.png", width = 8, height = 6, dpi = 300)
 ```
