@@ -13,6 +13,8 @@ library(tidyverse)
 library(prophet)
 library(forecast)
 library(splines)
+library(lubridate)
+library(patchwork)
 
 #Bringing in Data
 company <- vroom::vroom("CompanyGrowth.csv") |>
@@ -25,7 +27,181 @@ company <- vroom::vroom("CompanyGrowth.csv") |>
 ### 2025 Predictions
 
 ```{r}
+# adding months and year and date
+company <- company |>
+  mutate(
+    month = case_when(
+      qrtr == 1 ~ 1,
+      qrtr == 2 ~ 4,
+      qrtr == 3 ~ 7,
+      qrtr == 4 ~ 10
+    ),
+    date = as.Date(paste(year, month, "01", sep = "-"))
+  )
 
+
+# making a bar chart income, production, savings, unemployment
+graph_income <- company %>%
+  group_by(year) %>%
+  summarize(Avg_income = mean(income)) %>%
+  ggplot(aes(x=year, y=Avg_income)) + geom_bar(stat="identity") +
+  labs(title = 'Average Income by Year', x = 'Year', y = 'Average Income')
+
+graph_production <- company %>%
+  group_by(year) %>%
+  summarize(Avg_production = mean(production)) %>%
+  ggplot(aes(x=year, y=Avg_production)) + geom_bar(stat="identity") +
+  labs(title = 'Average Production by Year', x = 'Year', y = 'Average Production')
+
+graph_savings <- company %>%
+  group_by(year) %>%
+  summarize(Avg_savings = mean(savings)) %>%
+  ggplot(aes(x=year, y=Avg_savings)) + geom_bar(stat="identity") +
+  labs(title = 'Average Savings by Year', x = 'Year', y = 'Average Savings')
+
+graph_unemployment <- company %>%
+  group_by(year) %>%
+  summarize(Avg_unemployment = mean(unemployment)) %>%
+  ggplot(aes(x=year, y=Avg_unemployment)) + geom_bar(stat="identity") +
+  labs(title = 'Average Unemployment by Year', x = 'Year', y = 'Average Unemployment')
+
+(graph_income + graph_production) / (graph_savings + graph_unemployment)
+```
+
+```{r}
+# create the dataframes
+prophet_income_df <- company %>%
+  dplyr::select(ds = date,
+         y = income)
+
+prophet_production_df <- company %>%
+  dplyr::select(ds = date,
+         y = production)
+
+prophet_savings_df <- company %>%
+  dplyr::select(ds = date,
+         y = savings)
+
+prophet_unemployment_df <- company %>%
+  dplyr::select(ds = date,
+         y = unemployment)
+
+# initialize the models
+prophet_income <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+# add quarterly seasonality
+prophet_income <- add_seasonality(
+  prophet_income,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+prophet_production <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+# add seasonality
+prophet_production <- add_seasonality(
+  prophet_production,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+prophet_savings <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+
+# add seasonality
+prophet_savings <- add_seasonality(
+  prophet_savings,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+prophet_unemployment <- prophet(
+  seasonality.mode = "multiplicative",
+  weekly.seasonality = FALSE,
+  daily.seasonality = FALSE,
+  yearly.seasonality = FALSE,
+  changepoint.prior.scale = 0.5
+)
+
+# add seasonality
+prophet_unemployment <- add_seasonality(
+  prophet_unemployment,
+  name = "quarterly",
+  period = 365.25,
+  fourier.order = 4
+)
+
+# fit the models
+prophet_income <- fit.prophet(prophet_income, prophet_income_df)
+prophet_production <- fit.prophet(prophet_production, prophet_production_df)
+prophet_savings <- fit.prophet(prophet_savings, prophet_savings_df)
+prophet_unemployment <- fit.prophet(prophet_unemployment, prophet_unemployment_df)
+
+# made predictions for the upcoming year
+# making the new df
+last_date <- max(prophet_income_df$ds)
+
+future_quarterly <- data.frame(
+  ds = seq.Date(
+    from = last_date %m+% months(3),
+    by = "quarter",
+    length.out = 4
+  )
+)
+
+forecast_income <- predict(prophet_income, future_quarterly) %>% pull(yhat)
+forecast_production <- predict(prophet_production, future_quarterly) %>% pull(yhat)
+forecast_savings <- predict(prophet_savings, future_quarterly) %>% pull(yhat)
+forecast_unemployment <- predict(prophet_unemployment, future_quarterly) %>% pull(yhat)
+# add to the data frame
+future_quarterly$income <- forecast_income
+future_quarterly$production <- forecast_production
+future_quarterly$savings <- forecast_savings
+future_quarterly$unemployment <- forecast_unemployment
+```
+
+```{r}
+last_values <- tail(company, 1)
+
+lm_mod <- lm(
+  growth ~ income + production + savings + unemployment,
+  data = company
+)
+
+future_2025 <- data.frame(
+  income = rep(last_values$income, 4),
+  production = rep(last_values$production, 4),
+  savings = rep(last_values$savings, 4),
+  unemployment = rep(last_values$unemployment, 4)
+)
+
+future_preds <- predict(lm_mod, future_quarterly)
+
+future_quarterly$projected_growth <- future_preds
+
+ggplot(data = future_quarterly, mapping = aes(x = ds, y = projected_growth)) +
+  geom_bar(stat='identity') +
+  labs(title = 'Projected Growth over Next Year (Old Model)',
+       x = 'Date of Quarter',
+       y = 'Projected Growth')
 ```
 
 ## Problem 2 (Cooper)
